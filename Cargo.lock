@@ -705,6 +705,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "swc_ecma_visit"
+version = "8.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f7a65fa06d0c0f709f1df4e820ccdc4eca7b3db7f9d131545e20c2ac2f1cd23"
+dependencies = [
+ "new_debug_unreachable",
+ "num-bigint",
+ "swc_atoms",
+ "swc_common",
+ "swc_ecma_ast",
+ "swc_visit",
+ "tracing",
+]
+
+[[package]]
 name = "swc_eq_ignore_macros"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -822,8 +837,11 @@ dependencies = [
 name = "ts-schema"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "swc_common",
+ "swc_ecma_ast",
  "swc_ecma_parser",
+ "swc_ecma_visit",
 ]
 
 [[package]]

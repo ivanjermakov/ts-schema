@@ -1,0 +1,3 @@
+type B = {
+    z: number
+}
