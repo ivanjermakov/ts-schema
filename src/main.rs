@@ -1,13 +1,13 @@
 extern crate swc_ecma_parser;
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, HashMap},
     env::args,
     io::{Read, stdin},
 };
 
 use anyhow::{Context, Result, anyhow};
 use schemars::schema::{
-    InstanceType, ObjectValidation, RootSchema, Schema, SchemaObject, SingleOrVec, StringValidation,
+    InstanceType, ObjectValidation, RootSchema, Schema, SchemaObject, SingleOrVec,
 };
 use swc_common::sync::Lrc;
 use swc_common::{
@@ -96,46 +96,26 @@ fn make_schema(
     let schema = RootSchema {
         meta_schema: Some("http://json-schema.org/draft-07/schema".into()),
         schema: SchemaObject {
-            metadata: None,
-            instance_type: None,
-            format: None,
-            enum_values: None,
-            const_value: None,
-            subschemas: None,
-            number: None,
-            string: None,
-            array: None,
+            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::Object))),
             object: Some(Box::new(ObjectValidation {
-                max_properties: None,
-                min_properties: None,
-                required: BTreeSet::new(),
-                properties: vec![(
-                    "x".into(),
-                    Schema::Object(SchemaObject {
-                        metadata: None,
-                        instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-                        format: None,
-                        enum_values: None,
-                        const_value: None,
-                        subschemas: None,
-                        number: None,
-                        string: Some(Box::new(StringValidation::default())),
-                        array: None,
-                        object: None,
-                        reference: None,
-                        extensions: BTreeMap::new(),
-                    }),
-                )]
-                .into_iter()
-                .collect::<BTreeMap<_, _>>(),
-                pattern_properties: BTreeMap::new(),
-                additional_properties: None,
-                property_names: None,
+                properties: {
+                    vec![(
+                        "x".into(),
+                        Schema::Object(SchemaObject {
+                            instance_type: Some(SingleOrVec::Single(Box::new(
+                                InstanceType::String,
+                            ))),
+                            ..Default::default()
+                        }),
+                    )]
+                    .into_iter()
+                    .collect::<BTreeMap<_, _>>()
+                },
+                ..Default::default()
             })),
-            reference: None,
-            extensions: BTreeMap::new(),
+            ..Default::default()
         },
-        definitions: BTreeMap::new(),
+        ..Default::default()
     };
 
     Ok(schema)
