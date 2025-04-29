@@ -1,3 +1,3 @@
 type B = {
-    z: number
+    z: number[]
 }

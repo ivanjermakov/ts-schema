@@ -1,6 +1,5 @@
 extern crate swc_ecma_parser;
 use std::{
-    any::type_name,
     collections::{BTreeMap, HashMap},
     env::args,
     io::{Read, stdin},
@@ -8,15 +7,15 @@ use std::{
 
 use anyhow::{Context, Result, anyhow};
 use schemars::schema::{
-    InstanceType, ObjectValidation, RootSchema, Schema, SchemaObject, SingleOrVec,
+    ArrayValidation, InstanceType, ObjectValidation, RootSchema, Schema, SchemaObject, SingleOrVec,
 };
-use swc_common::{AstNode, sync::Lrc};
+use swc_common::sync::Lrc;
 use swc_common::{
     FileName, SourceMap,
     errors::{ColorConfig, Handler},
 };
 use swc_ecma_ast::{
-    ImportDecl, TsKeywordType, TsKeywordTypeKind, TsPropertySignature,
+    ImportDecl, TsArrayType, TsKeywordType, TsKeywordTypeKind, TsPropertySignature,
     TsType::{self, TsTypeLit},
     TsTypeAliasDecl, TsTypeAnn, TsTypeElement, TsTypeRef,
 };
@@ -158,29 +157,12 @@ fn make_schema(
                     }) => {
                         let member_name = key.clone().ident().context("not ident")?.sym.to_string();
                         let ts_type_ann: &TsTypeAnn = type_ann.as_ref().unwrap();
-                        let member_type = match *ts_type_ann.type_ann {
-                            TsType::TsTypeRef(TsTypeRef { ref type_name, .. }) => type_name
-                                .clone()
-                                .ident()
-                                .context("not ident")?
-                                .sym
-                                .to_string(),
-                            TsType::TsKeywordType(TsKeywordType { kind, .. }) => match kind {
-                                TsKeywordTypeKind::TsNumberKeyword => "number".into(),
-                                TsKeywordTypeKind::TsBooleanKeyword => "boolean".into(),
-                                TsKeywordTypeKind::TsStringKeyword => "string".into(),
-                                _ => todo!("{kind:?}"),
-                            },
-                            ref t => todo!("{t:?}"),
-                        };
-                        object_val.properties.insert(
-                            member_name.clone(),
-                            Schema::Object(SchemaObject {
-                                reference: Some(format!("#/definitions/{member_type}")),
-                                ..Default::default()
-                            }),
-                        );
-                        deps.push(member_type)
+                        let (member_object, mut member_deps) =
+                            make_schema_from_ts_type(&ts_type_ann.type_ann)?;
+                        deps.append(&mut member_deps);
+                        object_val
+                            .properties
+                            .insert(member_name.clone(), member_object);
                     }
                     _ => todo!("{member:?}"),
                 };
@@ -194,4 +176,49 @@ fn make_schema(
         t => todo!("{t:?}"),
     };
     Ok((object, deps))
+}
+
+fn make_schema_from_ts_type(ts_type: &TsType) -> Result<(Schema, Depenedencies)> {
+    let mut deps = vec![];
+    let schema = match ts_type {
+        TsType::TsTypeRef(TsTypeRef { type_name, .. }) => {
+            let type_name = type_name
+                .clone()
+                .ident()
+                .context("not ident")?
+                .sym
+                .to_string();
+            deps.push(type_name.clone());
+            Schema::Object(SchemaObject {
+                reference: Some(format!("#/definitions/{type_name}")),
+                ..Default::default()
+            })
+        }
+        TsType::TsKeywordType(TsKeywordType { kind, .. }) => {
+            let type_name = match kind {
+                TsKeywordTypeKind::TsNumberKeyword => "number",
+                TsKeywordTypeKind::TsBooleanKeyword => "boolean",
+                TsKeywordTypeKind::TsStringKeyword => "string",
+                _ => todo!("{kind:?}"),
+            };
+            deps.push(type_name.into());
+            Schema::Object(SchemaObject {
+                reference: Some(format!("#/definitions/{type_name}")),
+                ..Default::default()
+            })
+        }
+        TsType::TsArrayType(TsArrayType { elem_type, .. }) => {
+            let (array_schema, mut array_deps) = make_schema_from_ts_type(elem_type)?;
+            deps.append(&mut array_deps);
+            Schema::Object(SchemaObject {
+                array: Some(Box::new(ArrayValidation {
+                    items: Some(SingleOrVec::Single(Box::new(array_schema))),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            })
+        }
+        ref t => todo!("{t:?}"),
+    };
+    Ok((schema, deps))
 }
