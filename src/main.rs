@@ -155,6 +155,7 @@ fn make_schema(
                     TsTypeElement::TsPropertySignature(TsPropertySignature {
                         key,
                         type_ann,
+                        optional,
                         ..
                     }) => {
                         let member_name = key.clone().ident().context("not ident")?.sym.to_string();
@@ -165,6 +166,9 @@ fn make_schema(
                         object_val
                             .properties
                             .insert(member_name.clone(), member_object);
+                        if !optional {
+                            object_val.required.insert(member_name.clone());
+                        }
                     }
                     _ => todo!("{member:?}"),
                 };
@@ -228,10 +232,13 @@ fn make_schema_from_ts_type(ts_type: &TsType) -> Result<(Schema, Depenedencies)>
 #[cfg(test)]
 mod test {
     use crate::make_json_schema;
-    use serde_json::{Value, json};
+    use serde_json::{Value, from_str, json, to_string_pretty};
 
     fn assert_json_eq(a: &str, b: Value) {
-        assert_eq!(serde_json::from_str::<Value>(a).unwrap(), b)
+        let a_json = from_str::<Value>(a).unwrap();
+        let a_pretty = to_string_pretty(&a_json).unwrap();
+        let b_pretty = to_string_pretty(&b).unwrap();
+        assert_eq!(a_json, b, "\nleft: {}\nright: {}", a_pretty, b_pretty)
     }
 
     #[test]
@@ -271,11 +278,10 @@ type A = {
         assert_json_eq(
             &schema,
             json!({
-              "$schema": "http://json-schema.org/draft-07/schema",
               "$ref": "#/definitions/A",
+              "$schema": "http://json-schema.org/draft-07/schema",
               "definitions": {
                 "A": {
-                  "type": "object",
                   "properties": {
                     "x": {
                       "$ref": "#/definitions/number"
@@ -286,7 +292,13 @@ type A = {
                     "z": {
                       "$ref": "#/definitions/boolean"
                     }
-                  }
+                  },
+                  "required": [
+                    "x",
+                    "y",
+                    "z"
+                  ],
+                  "type": "object"
                 },
                 "boolean": {
                   "type": "boolean"
@@ -316,19 +328,54 @@ type B = {}",
         assert_json_eq(
             &schema,
             json!({
-              "$schema": "http://json-schema.org/draft-07/schema",
               "$ref": "#/definitions/A",
+              "$schema": "http://json-schema.org/draft-07/schema",
               "definitions": {
                 "A": {
-                  "type": "object",
                   "properties": {
-                      "b": {
-                          "$ref": "#/definitions/B"
-                      }
-                  }
+                    "b": {
+                      "$ref": "#/definitions/B"
+                    }
+                  },
+                  "required": [
+                    "b"
+                  ],
+                  "type": "object"
                 },
                 "B": {
                   "type": "object"
+                }
+              }
+            }),
+        );
+    }
+
+    #[test]
+    fn optional_field() {
+        let schema = make_json_schema(
+            "\
+type A = {
+    x?: number
+}",
+            "A",
+        )
+        .unwrap();
+        assert_json_eq(
+            &schema,
+            json!({
+              "$ref": "#/definitions/A",
+              "$schema": "http://json-schema.org/draft-07/schema",
+              "definitions": {
+                "A": {
+                  "properties": {
+                    "x": {
+                      "$ref": "#/definitions/number"
+                    }
+                  },
+                  "type": "object"
+                },
+                "number": {
+                  "type": "number"
                 }
               }
             }),
