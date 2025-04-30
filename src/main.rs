@@ -43,14 +43,23 @@ impl Visit for TypeVisitor {
 }
 
 fn main() -> Result<()> {
+    let type_name = args().nth(1).context("TYPE_NAME expected")?;
+    let input = read_stdin()?;
+    let output = make_json_schema(&input, &type_name)?;
+    println!("{}", output);
+    Ok(())
+}
+
+fn read_stdin() -> Result<String> {
+    let mut input = String::new();
+    stdin().read_to_string(&mut input)?;
+    Ok(input)
+}
+
+fn make_json_schema(input: &str, type_name: &str) -> Result<String> {
     let cm: Lrc<SourceMap> = Default::default();
     let handler = Handler::with_tty_emitter(ColorConfig::Auto, true, false, Some(cm.clone()));
-
-    let type_name = args().nth(1).context("TYPE_NAME expected")?;
-
-    let input = read_stdin()?;
-
-    let source = cm.new_source_file(FileName::Custom("test.ts".into()).into(), input);
+    let source = cm.new_source_file(FileName::Custom("test.ts".into()).into(), input.into());
     let syntax = Syntax::Typescript(TsSyntax {
         tsx: true,
         decorators: true,
@@ -78,17 +87,10 @@ fn main() -> Result<()> {
     };
     module.visit_with(&mut type_visitor);
 
-    let schema = make_root_schema(&type_name, &type_visitor.type_defs)?;
+    let schema = make_root_schema(type_name, &type_visitor.type_defs)?;
     let output = serde_json::to_string(&schema)?;
-    println!("{}", output);
 
-    Ok(())
-}
-
-fn read_stdin() -> Result<String> {
-    let mut input = String::new();
-    stdin().read_to_string(&mut input)?;
-    Ok(input)
+    Ok(output)
 }
 
 type Depenedencies = Vec<String>;
@@ -221,4 +223,115 @@ fn make_schema_from_ts_type(ts_type: &TsType) -> Result<(Schema, Depenedencies)>
         ref t => todo!("{t:?}"),
     };
     Ok((schema, deps))
+}
+
+#[cfg(test)]
+mod test {
+    use crate::make_json_schema;
+    use serde_json::{Value, json};
+
+    fn assert_json_eq(a: &str, b: Value) {
+        assert_eq!(serde_json::from_str::<Value>(a).unwrap(), b)
+    }
+
+    #[test]
+    fn empty_object() {
+        let schema = make_json_schema(
+            "\
+type A = {}",
+            "A",
+        )
+        .unwrap();
+        assert_json_eq(
+            &schema,
+            json!({
+              "$schema": "http://json-schema.org/draft-07/schema",
+              "$ref": "#/definitions/A",
+              "definitions": {
+                "A": {
+                  "type": "object"
+                }
+              }
+            }),
+        );
+    }
+
+    #[test]
+    fn object_with_primitives() {
+        let schema = make_json_schema(
+            "\
+type A = {
+    x: number;
+    y: string;
+    z: boolean
+}",
+            "A",
+        )
+        .unwrap();
+        assert_json_eq(
+            &schema,
+            json!({
+              "$schema": "http://json-schema.org/draft-07/schema",
+              "$ref": "#/definitions/A",
+              "definitions": {
+                "A": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "$ref": "#/definitions/number"
+                    },
+                    "y": {
+                      "$ref": "#/definitions/string"
+                    },
+                    "z": {
+                      "$ref": "#/definitions/boolean"
+                    }
+                  }
+                },
+                "boolean": {
+                  "type": "boolean"
+                },
+                "number": {
+                  "type": "number"
+                },
+                "string": {
+                  "type": "string"
+                }
+              }
+            }),
+        );
+    }
+
+    #[test]
+    fn nested_object() {
+        let schema = make_json_schema(
+            "\
+type A = {
+    b: B
+}
+type B = {}",
+            "A",
+        )
+        .unwrap();
+        assert_json_eq(
+            &schema,
+            json!({
+              "$schema": "http://json-schema.org/draft-07/schema",
+              "$ref": "#/definitions/A",
+              "definitions": {
+                "A": {
+                  "type": "object",
+                  "properties": {
+                      "b": {
+                          "$ref": "#/definitions/B"
+                      }
+                  }
+                },
+                "B": {
+                  "type": "object"
+                }
+              }
+            }),
+        );
+    }
 }
