@@ -148,6 +148,7 @@ fn make_schema(
     let object = match type_def.type_ann.as_ref() {
         TsTypeLit(ts_type_lit) => {
             let mut object_val = ObjectValidation {
+                additional_properties: Some(Box::new(Schema::Bool(false))),
                 ..Default::default()
             };
             for member in &ts_type_lit.members {
@@ -256,6 +257,7 @@ type A = {}",
               "$ref": "#/definitions/A",
               "definitions": {
                 "A": {
+                  "additionalProperties": false,
                   "type": "object"
                 }
               }
@@ -282,6 +284,7 @@ type A = {
               "$schema": "http://json-schema.org/draft-07/schema",
               "definitions": {
                 "A": {
+                  "additionalProperties": false,
                   "properties": {
                     "x": {
                       "$ref": "#/definitions/number"
@@ -332,6 +335,7 @@ type B = {}",
               "$schema": "http://json-schema.org/draft-07/schema",
               "definitions": {
                 "A": {
+                  "additionalProperties": false,
                   "properties": {
                     "b": {
                       "$ref": "#/definitions/B"
@@ -343,6 +347,7 @@ type B = {}",
                   "type": "object"
                 },
                 "B": {
+                  "additionalProperties": false,
                   "type": "object"
                 }
               }
@@ -367,6 +372,7 @@ type A = {
               "$schema": "http://json-schema.org/draft-07/schema",
               "definitions": {
                 "A": {
+                  "additionalProperties": false,
                   "properties": {
                     "x": {
                       "$ref": "#/definitions/number"
