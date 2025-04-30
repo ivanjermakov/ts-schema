@@ -15,7 +15,7 @@ use swc_common::{
     errors::{ColorConfig, Handler},
 };
 use swc_ecma_ast::{
-    ImportDecl, TsArrayType, TsKeywordType, TsKeywordTypeKind, TsPropertySignature,
+    TsArrayType, TsKeywordType, TsKeywordTypeKind, TsPropertySignature,
     TsType::{self, TsTypeLit},
     TsTypeAliasDecl, TsTypeAnn, TsTypeElement, TsTypeRef,
 };
@@ -30,15 +30,6 @@ impl Visit for TypeVisitor {
     fn visit_ts_type_alias_decl(&mut self, node: &TsTypeAliasDecl) {
         self.type_defs.insert(node.id.sym.to_string(), node.clone());
         node.visit_children_with(self);
-    }
-
-    fn visit_import_decl(&mut self, _decl: &ImportDecl) {
-        // for specifier in &decl.specifiers {
-        //     if let swc_ecma_ast::ImportSpecifier::Named(named) = specifier {
-        //         let Ident { sym, .. } = &named.local;
-        //     }
-        // }
-        // decl.visit_children_with(self);
     }
 }
 
@@ -96,13 +87,13 @@ fn make_json_schema(input: &str, type_name: &str) -> Result<String> {
 type Depenedencies = Vec<String>;
 
 fn make_root_schema(
-    type_name: &str,
+    root_type_name: &str,
     type_defs: &HashMap<String, TsTypeAliasDecl>,
 ) -> Result<RootSchema> {
     let mut definitions = BTreeMap::new();
-    let mut dependencies: Depenedencies = vec![type_name.to_string()];
+    let mut dependencies: Depenedencies = vec![root_type_name.to_string()];
     while let Some(type_name) = dependencies.pop() {
-        let (schema, deps) = make_schema(&type_name, type_defs)?;
+        let (schema, deps) = make_schema(&type_name, type_defs, type_name == root_type_name)?;
         definitions.insert(type_name, schema);
         for dep in deps {
             if !dependencies.contains(&dep) {
@@ -113,7 +104,7 @@ fn make_root_schema(
     Ok(RootSchema {
         meta_schema: Some("http://json-schema.org/draft-07/schema".into()),
         schema: SchemaObject {
-            reference: Some(format!("#/definitions/{type_name}")),
+            reference: Some(format!("#/definitions/{root_type_name}")),
             ..Default::default()
         },
         definitions,
@@ -123,6 +114,7 @@ fn make_root_schema(
 fn make_schema(
     type_name: &str,
     type_defs: &HashMap<String, TsTypeAliasDecl>,
+    is_root: bool,
 ) -> Result<(Schema, Depenedencies)> {
     {
         let instance_type = match type_name {
@@ -173,6 +165,15 @@ fn make_schema(
                     }
                     _ => todo!("{member:?}"),
                 };
+            }
+            if is_root {
+                object_val.properties.insert(
+                    "$schema".into(),
+                    Schema::Object(SchemaObject {
+                        instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
+                        ..Default::default()
+                    }),
+                );
             }
             Schema::Object(SchemaObject {
                 instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::Object))),
@@ -246,21 +247,26 @@ mod test {
     fn empty_object() {
         let schema = make_json_schema(
             "\
-type A = {}",
+            type A = {}",
             "A",
         )
         .unwrap();
         assert_json_eq(
             &schema,
             json!({
-              "$schema": "http://json-schema.org/draft-07/schema",
-              "$ref": "#/definitions/A",
-              "definitions": {
-                "A": {
-                  "additionalProperties": false,
-                  "type": "object"
+                "$schema": "http://json-schema.org/draft-07/schema",
+                "$ref": "#/definitions/A",
+                "definitions": {
+                    "A": {
+                        "properties": {
+                            "$schema": {
+                                "type": "string"
+                            },
+                        },
+                        "additionalProperties": false,
+                        "type": "object"
+                    }
                 }
-              }
             }),
         );
     }
@@ -269,50 +275,53 @@ type A = {}",
     fn object_with_primitives() {
         let schema = make_json_schema(
             "\
-type A = {
-    x: number;
-    y: string;
-    z: boolean
-}",
+            type A = {
+                x: number;
+                   y: string;
+                      z: boolean
+            }",
             "A",
         )
         .unwrap();
         assert_json_eq(
             &schema,
             json!({
-              "$ref": "#/definitions/A",
-              "$schema": "http://json-schema.org/draft-07/schema",
-              "definitions": {
-                "A": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "x": {
-                      "$ref": "#/definitions/number"
+                "$ref": "#/definitions/A",
+                "$schema": "http://json-schema.org/draft-07/schema",
+                "definitions": {
+                    "A": {
+                        "additionalProperties": false,
+                        "properties": {
+                            "$schema": {
+                                "type": "string"
+                            },
+                            "x": {
+                                "$ref": "#/definitions/number"
+                            },
+                            "y": {
+                                "$ref": "#/definitions/string"
+                            },
+                            "z": {
+                                "$ref": "#/definitions/boolean"
+                            }
+                        },
+                        "required": [
+                            "x",
+                            "y",
+                            "z"
+                        ],
+                        "type": "object"
                     },
-                    "y": {
-                      "$ref": "#/definitions/string"
+                    "boolean": {
+                        "type": "boolean"
                     },
-                    "z": {
-                      "$ref": "#/definitions/boolean"
+                    "number": {
+                        "type": "number"
+                    },
+                    "string": {
+                        "type": "string"
                     }
-                  },
-                  "required": [
-                    "x",
-                    "y",
-                    "z"
-                  ],
-                  "type": "object"
-                },
-                "boolean": {
-                  "type": "boolean"
-                },
-                "number": {
-                  "type": "number"
-                },
-                "string": {
-                  "type": "string"
                 }
-              }
             }),
         );
     }
@@ -321,36 +330,39 @@ type A = {
     fn nested_object() {
         let schema = make_json_schema(
             "\
-type A = {
-    b: B
-}
-type B = {}",
+            type A = {
+                b: B
+            }
+            type B = {}",
             "A",
         )
         .unwrap();
         assert_json_eq(
             &schema,
             json!({
-              "$ref": "#/definitions/A",
-              "$schema": "http://json-schema.org/draft-07/schema",
-              "definitions": {
-                "A": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "b": {
-                      "$ref": "#/definitions/B"
+                "$ref": "#/definitions/A",
+                "$schema": "http://json-schema.org/draft-07/schema",
+                "definitions": {
+                    "A": {
+                        "additionalProperties": false,
+                        "properties": {
+                            "$schema": {
+                                "type": "string"
+                            },
+                            "b": {
+                                "$ref": "#/definitions/B"
+                            }
+                        },
+                        "required": [
+                            "b"
+                        ],
+                        "type": "object"
+                    },
+                    "B": {
+                        "additionalProperties": false,
+                        "type": "object"
                     }
-                  },
-                  "required": [
-                    "b"
-                  ],
-                  "type": "object"
-                },
-                "B": {
-                  "additionalProperties": false,
-                  "type": "object"
                 }
-              }
             }),
         );
     }
@@ -359,31 +371,34 @@ type B = {}",
     fn optional_field() {
         let schema = make_json_schema(
             "\
-type A = {
-    x?: number
-}",
+            type A = {
+                x?: number
+            }",
             "A",
         )
         .unwrap();
         assert_json_eq(
             &schema,
             json!({
-              "$ref": "#/definitions/A",
-              "$schema": "http://json-schema.org/draft-07/schema",
-              "definitions": {
-                "A": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "x": {
-                      "$ref": "#/definitions/number"
+                "$ref": "#/definitions/A",
+                "$schema": "http://json-schema.org/draft-07/schema",
+                "definitions": {
+                    "A": {
+                        "additionalProperties": false,
+                        "properties": {
+                            "$schema": {
+                                "type": "string"
+                            },
+                            "x": {
+                                "$ref": "#/definitions/number"
+                            }
+                        },
+                        "type": "object"
+                    },
+                    "number": {
+                        "type": "number"
                     }
-                  },
-                  "type": "object"
-                },
-                "number": {
-                  "type": "number"
                 }
-              }
             }),
         );
     }
